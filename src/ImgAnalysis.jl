@@ -43,16 +43,13 @@ end
 # Count Multiple Area in One Image by DFS   #
 # = = = = = = = = = = = = = = = = = = = = = #
 
-const NEIGHBOR_ROWOPS = ( 0, -1,  0, +1)
-const NEIGHBOR_COLOPS = (-1,  0, +1,  0)
-
 function count_area(img::BitMatrix)
     m, n = size(img)
 
-    v = BitArray(false for i in 1:m, j in 1:n)
-    r = Vector{NTuple{3,Int}}(undef, 0)
-    s = IndexStack((m - 1) * n >> 1)
-    a = 0
+    v = BitArray(false for i in 1:m, j in 1:n) # visited
+    r = Vector{NTuple{3,Int}}(undef, 0)        # records
+    s = IndexStack((m - 1) * n >> 1)           # stack
+    a = 0                                      # area
 
     for j in axes(v, 2), i in axes(v, 1)
         if @inbounds !v[i,j]
@@ -63,16 +60,41 @@ function count_area(img::BitMatrix)
             
                 while true
                     length(s) == 0 && break
-                    ri, ci = pop!(s)
-                    for k in 1:4
-                        @inbounds ki = ri + NEIGHBOR_ROWOPS[k]
-                        @inbounds kj = ci + NEIGHBOR_COLOPS[k]
-                        if 0 < ki ≤ m && 0 < kj ≤ n && @inbounds !v[ki, kj]
-                            @inbounds v[ki, kj] = true
-                            if @inbounds img[ki, kj]
-                                push!(s, ki, kj)
-                                a += 1
-                            end
+                    ix, jx = pop!(s)
+
+                    jj = jx - 1
+                    if 0 < jj && @inbounds !v[ix, jj]
+                        @inbounds v[ix, jj] = true
+                        if @inbounds img[ix, jj]
+                            push!(s, ix, jj)
+                            a += 1
+                        end
+                    end
+
+                    ii = ix - 1
+                    if 0 < ii && @inbounds !v[ii, jx]
+                        @inbounds v[ii, jx] = true
+                        if @inbounds img[ii, jx]
+                            push!(s, ii, jx)
+                            a += 1
+                        end
+                    end
+
+                    jj = jx + 1
+                    if jj ≤ n && @inbounds !v[ix, jj]
+                        @inbounds v[ix, jj] = true
+                        if @inbounds img[ix, jj]
+                            push!(s, ix, jj)
+                            a += 1
+                        end
+                    end
+
+                    ii = ix + 1
+                    if ii ≤ m && @inbounds !v[ii, jx]
+                        @inbounds v[ii, jx] = true
+                        if @inbounds img[ii, jx]
+                            push!(s, ii, jx)
+                            a += 1
                         end
                     end
                 end
