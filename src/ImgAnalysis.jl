@@ -1,8 +1,58 @@
 module ImgAnalysis
 
+import FixedPointNumbers: N0f8
+import Colors: RGB
+
+# = = = = = = = = = = = = = = = = = = = = = #
+# Background Subtraction by Data Levelling  #
+# = = = = = = = = = = = = = = = = = = = = = #
+
+@inline rgb_to_gray(rgb::RGB{N0f8}) = 0.298N0f8 * rgb.r + 0.588N0f8 * rgb.g + 0.114N0f8 * rgb.b
+@inline rgb_to_gray(img::Matrix{RGB{N0f8}}) = rgb_to_gray!(similar(img, Float32), img)
+
+function rgb_to_gray!(des::Matrix{Float32}, src::Matrix{RGB{N0f8}})
+    @simd for i in eachindex(des)
+        @inbounds des[i] = Float32(rgb_to_gray(src[i]))
+    end
+    return des
+end
+
+function leveling(img::Matrix{T}) where T<:Real
+    m, n = size(img)
+    return leveling!(Matrix{T}(undef, m, n), img, m, n)
+end
+
+function leveling!(des::Matrix{T}, src::Matrix{T}, m::Int, n::Int) where T<:Real
+    a1 = m - 1
+    a2 = n - 1
+    a3 = @inbounds src[m,n] - src[1,1]
+    b1 = 1 - m
+    b2 = n - 1
+    b3 = @inbounds src[1,n] - src[m,1]
+
+    nx = a2 * b3 - a3 * b2
+    ny = a3 * b1 - a1 * b3
+    nz = a1 * b2 - a2 * b1
+
+    ip = argmin(src)
+
+    d0 = @inbounds nx * ip[1] + ny * ip[2] + nz * src[ip]
+    nx = nx / nz
+    ny = ny / nz
+    d0 = d0 / nz
+
+    for j in axes(des, 2)
+        @simd for i in axes(des, 1)
+            @inbounds des[i,j] = src[i,j] + nx * i + ny * j - d0
+        end
+    end
+    return des
+end
+
 # = = = = = = = = = = = = = = = = = = = = = #
 # Last-In, First-Out Stack for DFS Indexing #
 # = = = = = = = = = = = = = = = = = = = = = #
+
 mutable struct IndexStack
     capacity::Int     # size of storage capacity
     rind::Vector{Int} # row-wise indices
