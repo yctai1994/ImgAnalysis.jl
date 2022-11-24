@@ -305,4 +305,123 @@ function count_area(img::BitMatrix)
     return r
 end
 
+# = = = = = = = = = = = = = = = = = = = = = #
+# Kernel K-Means Clustering                 #
+# = = = = = = = = = = = = = = = = = = = = = #
+
+#=
+Kernel function:
+----------------
+    exp(-‖Δh‖/γH - ‖Δw‖/γW - ‖Δg‖/γG)
+
+Parameters:
+----------------
+    1. Δh, γH := height diff. and height factor (row-indexing)
+    2. Δw, γW := width diff. and width factor (column-indexing)
+    3. Δg, γG := grayscale diff. and grayscale factor
+=#
+@inline kernel(Δh::Real, Δw::Real, Δg::Real, γH::Real, γW::Real, γG::Real) = exp(-abs(Δh) / γH - abs(Δw) / γW - abs(Δg) / γG)
+
+function kernel!(KNN::MatI, XMN::MatI; γH::Real=3.0, γW::Real=3.0, γG::Real=4e-2)
+    N = size(XMN, 2)
+    for j in 1:N, i in j:N
+        @inbounds KNN[i,j] = kernel(XMN[1,i] - XMN[1,j], XMN[2,i] - XMN[2,j], XMN[3,i] - XMN[3,j], γH, γW, γG)
+    end
+    return KNN
+end
+
+#=
+K-means++ Initialization:
+-------------------------
+    For all points 𝐱, the distance 𝐷(𝐱) is defined as
+        𝐷(𝐱) = (distance to the nearest centroid)
+
+    The new centroid is chosen by
+        (new centroid) = 𝗮𝗿𝗴𝗺𝗮𝘅 𝐷(𝐱) ∀ 𝐱
+
+Parameters:
+-------------------------
+    1. WNK ∈ ℝ(N × K) := Matrix of weights
+    2. DNK ∈ ℝ(N × K) := Matrix of point-to-centroid distances
+    3. KNN ∈ ℝ(N × N) := Kernel (Gram) matrix
+=#
+function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
+    N, K = size(WNK)
+    m = rand(1:N) # randomly choose a point as the 1st centroid
+    k = 1         # counting of found centroids
+    @simd for n in axes(DNK, 1)
+        @inbounds DNK[n,k] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
+    end
+
+    while k < K
+        x2m_max = -Inf
+        m = 0
+        for n in axes(DNK, 1)
+            x2m_min = minimum(view(DNK, n, 1:k))
+            if x2m_min > x2m_max
+                x2m_max = x2m_min
+                m = n
+            end
+        end
+        k += 1
+        @simd for n in axes(DNK, 1)
+            @inbounds DNK[n,k] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
+        end
+    end
+
+    for n in axes(WNK, 1)
+        ktarget = argmax(view(DNK, n, :))
+        @simd for k in axes(WNK, 2)
+            @inbounds WNK[n,k] = ifelse(k ≡ ktarget, 1.0, 0.0)
+        end
+    end
+    return WNK
+end
+
+function update!(WNK::MatI, DNK::MatIO, N1K::MatI, KNN::MatI)
+    sum!(N1K, WNK)
+
+    N = size(WNK, 1)
+    for k in axes(WNK, 2)
+        N1k = @inbounds N1K[k]
+        WNk = view(WNK, :, k)
+        tmp = dot(WNk, N, KNN, WNk, N) / (N1k * N1k)
+        @simd for n in axes(WNK, 1)
+            @inbounds DNK[n,k] = tmp
+        end
+
+        BLAS.symv!('L', -2.0 / N1k, KNN, WNk, 1.0, view(DNK, :, k))
+    end
+
+    change = 0
+    for n in axes(WNK, 1)
+        kOld = findfirst(isone, view(WNK, n, :))
+        kNew = argmin(view(DNK, n, :))
+        if kOld ≠ kNew
+            @inbounds WNK[n,kOld], WNK[n,kNew] = 0.0, 1.0
+            change += 1
+        end
+    end
+
+    return change
+end
+
+function iterate!(WNK::MatI, DNK::MatI, N1K::MatI, KNN::MatI)
+    changes = 1
+    trapped = 0
+    itcount = 0
+    while changes ≠ 0 && trapped < 5 && itcount < 200
+        change_ = update!(WNK, DNK, N1K, KNN)
+        itcount += 1
+        println("Current change = $change_ ($itcount)")
+        if change_ ≠ changes
+            changes = change_
+            trapped = 0
+        else
+            trapped += 1
+        end
+    end
+    return nothing
+end
+
 end # module ImgAnalysis
