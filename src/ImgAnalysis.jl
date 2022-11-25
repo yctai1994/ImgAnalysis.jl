@@ -8,6 +8,7 @@ const VecI  = AbstractVector
 const VecO  = AbstractVector
 const MatI  = AbstractMatrix
 const MatO  = AbstractMatrix
+const MatIO = AbstractMatrix
 
 # = = = = = = = = = = = = = = = = = = = = = #
 # RGB to Gray Scale Conversion              #
@@ -320,7 +321,7 @@ Parameters:
     2. Δw, γW := width diff. and width factor (column-indexing)
     3. Δg, γG := grayscale diff. and grayscale factor
 =#
-@inline kernel(Δh::Real, Δw::Real, Δg::Real, γH::Real, γW::Real, γG::Real) = exp(-abs(Δh) / γH - abs(Δw) / γW - abs(Δg) / γG)
+@inline kernel(Δh::Real, Δw::Real, Δg::Real, γH::Real, γW::Real, γG::Real) = exp(-γH * abs(Δh) - γW * abs(Δw) - γG * abs(Δg))
 
 function kernel!(KNN::MatI, XMN::MatI; γH::Real=3.0, γW::Real=3.0, γG::Real=4e-2)
     N = size(XMN, 2)
@@ -354,13 +355,11 @@ function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
     end
 
     while k < K
-        x2m_max = -Inf
-        m = 0
+        x2m_max = -Inf; m = 0
         for n in axes(DNK, 1)
             x2m_min = minimum(view(DNK, n, 1:k))
             if x2m_min > x2m_max
-                x2m_max = x2m_min
-                m = n
+                x2m_max = x2m_min; m = n
             end
         end
         k += 1
@@ -368,6 +367,19 @@ function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
             @inbounds DNK[n,k] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
         end
     end
+
+    # reassign the randomly chosen centroid
+    x2m_max = -Inf; m = 0
+    for n in axes(DNK, 1)
+        x2m_min = minimum(view(DNK, n, 2:K))
+        if x2m_min > x2m_max
+            x2m_max = x2m_min; m = n
+        end
+    end
+    @simd for n in axes(DNK, 1)
+        @inbounds DNK[n,1] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
+    end
+    # end
 
     for n in axes(WNK, 1)
         ktarget = argmax(view(DNK, n, :))
@@ -379,13 +391,13 @@ function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
 end
 
 function update!(WNK::MatI, DNK::MatIO, N1K::MatI, KNN::MatI)
-    sum!(N1K, WNK)
+    sum!(N1K, WNK) # no benefit with multithreading
 
     N = size(WNK, 1)
-    for k in axes(WNK, 2)
+    Threads.@threads for k in axes(WNK, 2) # There are several allocs. for multithreading
         N1k = @inbounds N1K[k]
         WNk = view(WNK, :, k)
-        tmp = dot(WNk, N, KNN, WNk, N) / (N1k * N1k)
+        tmp = dot(WNk, N, KNN, WNk, N) / (N1k * N1k) # 1 allocs. for multithreading
         @simd for n in axes(WNK, 1)
             @inbounds DNK[n,k] = tmp
         end
@@ -394,7 +406,7 @@ function update!(WNK::MatI, DNK::MatIO, N1K::MatI, KNN::MatI)
     end
 
     change = 0
-    for n in axes(WNK, 1)
+    for n in axes(WNK, 1) # no benefit with multithreading
         kOld = findfirst(isone, view(WNK, n, :))
         kNew = argmin(view(DNK, n, :))
         if kOld ≠ kNew
