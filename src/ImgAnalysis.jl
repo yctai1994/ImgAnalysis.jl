@@ -311,9 +311,27 @@ end
 # = = = = = = = = = = = = = = = = = = = = = #
 
 #=
+Data Encoding:
+--------------
+    To encode each dimension of data point
+    into a range of [0, 1]
+=#
+function encoding(img::MatI{T}) where T<:Real
+    m, n = size(img)
+    dat = Matrix{T}(undef, 3, m * n)
+    for j in axes(img, 2)
+        pad = (j - 1) * m
+        @simd for i in axes(img, 1)
+            @inbounds dat[1, i + pad], dat[2, i + pad], dat[3, i + pad] = i / m, j / n, img[i,j]
+        end
+    end
+    return dat
+end
+
+#=
 Kernel function:
 ----------------
-    exp(-‖Δh‖/γH - ‖Δw‖/γW - ‖Δg‖/γG)
+    exp(-γH * ‖Δh‖ - γW * ‖Δw‖ - γG * ‖Δg‖)
 
 Parameters:
 ----------------
@@ -328,8 +346,26 @@ function kernel!(KNN::MatI, XMN::MatI; γH::Real=3.0, γW::Real=3.0, γG::Real=4
     for j in 1:N, i in j:N
         @inbounds KNN[i,j] = kernel(XMN[1,i] - XMN[1,j], XMN[2,i] - XMN[2,j], XMN[3,i] - XMN[3,j], γH, γW, γG)
     end
+
+    for j in axes(KNN, 2)
+        @simd for i in 1:j-1
+            @inbounds KNN[i,j] = KNN[j,i]
+        end
+    end
     return KNN
 end
+
+#=
+Parameters:
+-------------------------
+    1. WNK ∈ ℝ(N × K) := Matrix of weights wₙₖ
+    2. DNK ∈ ℝ(N × K) := Matrix of point-to-centroid distances dₙₖ = ‖ ϕ(xₙ) - ϕ(xₖ) ‖
+    3. BNK ∈ ℝ(N × K) := Matrix of power of distance (dₙₖ)ᵖ
+    4. SN1 ∈ ℝ(N × 1) := Vector of power sum ∑(dₙₖ)ᵖ for k = 1...K
+    5. N1K ∈ ℝ(1 × N) := Row Vector of ∑(wₙₖ) for n = 1...N
+    6. KNN ∈ ℝ(N × N) := Kernel (Gram) matrix, kᵢⱼ = k(xᵢ, xⱼ)
+    7. p ∈ ℝ          := Real number of (dₙₖ)'s power
+=#
 
 #=
 K-means++ Initialization:
@@ -339,19 +375,13 @@ K-means++ Initialization:
 
     The new centroid is chosen by
         (new centroid) = 𝗮𝗿𝗴𝗺𝗮𝘅 𝐷(𝐱) ∀ 𝐱
-
-Parameters:
--------------------------
-    1. WNK ∈ ℝ(N × K) := Matrix of weights
-    2. DNK ∈ ℝ(N × K) := Matrix of point-to-centroid distances
-    3. KNN ∈ ℝ(N × N) := Kernel (Gram) matrix
 =#
-function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
+function kmeanspp!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, KNN::MatI, p::Real) # type-stability ✓
     N, K = size(WNK)
     m = rand(1:N) # randomly choose a point as the 1st centroid
     k = 1         # counting of found centroids
     @simd for n in axes(DNK, 1)
-        @inbounds DNK[n,k] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
+        @inbounds DNK[n,k] = ifelse(n ≠ m, KNN[n,n] + KNN[m,m] - 2.0 * KNN[n,m], eps())
     end
 
     while k < K
@@ -364,7 +394,7 @@ function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
         end
         k += 1
         @simd for n in axes(DNK, 1)
-            @inbounds DNK[n,k] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
+            @inbounds DNK[n,k] = ifelse(n ≠ m, KNN[n,n] + KNN[m,m] - 2.0 * KNN[n,m], eps())
         end
     end
 
@@ -377,62 +407,113 @@ function kmeanspp!(WNK::MatIO, DNK::MatI, KNN::MatI)
         end
     end
     @simd for n in axes(DNK, 1)
-        @inbounds DNK[n,1] = KNN[n,n] + KNN[m,m] - 2.0 * KNN[max(m,n), min(m,n)]
+        @inbounds DNK[n,1] = ifelse(n ≠ m, KNN[n,n] + KNN[m,m] - 2.0 * KNN[n,m], eps())
     end
     # end
 
-    for n in axes(WNK, 1)
-        ktarget = argmax(view(DNK, n, :))
-        @simd for k in axes(WNK, 2)
-            @inbounds WNK[n,k] = ifelse(k ≡ ktarget, 1.0, 0.0)
+    # Compute the generalized p-sum
+    for k in axes(BNK, 2)
+        @simd for n in axes(BNK, 1)
+            @inbounds BNK[n,k] = (DNK[n,k])^p
         end
     end
-    return WNK
+
+    sum!(SN1, BNK)
+
+    arg1 = -log(K) / p
+    arg2 = p - 1.0
+    arg3 = arg2 / p
+
+    for k in axes(WNK, 2)
+        @simd for n in axes(WNK, 1)
+            @inbounds WNK[n,k] = exp(arg1 + arg2 * log(DNK[n,k]) - arg3 * log(SN1[n]))
+        end
+    end
+
+    return nothing
 end
 
-function update!(WNK::MatI, DNK::MatIO, N1K::MatI, KNN::MatI)
+#=
+Kernel Power K-means Update:
+----------------------------
+    ...
+=#
+function update!(WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, p::Real) # type-stability ✓
     sum!(N1K, WNK) # no benefit with multithreading
 
-    N = size(WNK, 1)
-    Threads.@threads for k in axes(WNK, 2) # There are several allocs. for multithreading
+    N, K = size(WNK)
+
+    Threads.@threads for k in axes(DNK, 2) # There are several allocs. for multithreading
         N1k = @inbounds N1K[k]
         WNk = view(WNK, :, k)
         tmp = dot(WNk, N, KNN, WNk, N) / (N1k * N1k) # 1 allocs. for multithreading
+        for n in axes(DNK, 1)
+            @inbounds DNK[n,k] = KNN[n,n] + tmp
+        end
+
+        BLAS.symv!('U', -2.0 / N1k, KNN, WNk, 1.0, view(DNK, :, k))
+    end
+
+    # Compute the generalized sum
+    for k in axes(BNK, 2)
+        @simd for n in axes(BNK, 1)
+            @inbounds BNK[n,k] = (DNK[n,k])^p
+        end
+    end
+
+    sum!(SN1, BNK)
+
+    arg1 = -log(K) / p
+    arg2 = p - 1.0
+    arg3 = arg2 / p
+
+    # dₙₖ = 0 will cause an NaN result, we set wₙₖ( dₙₖ = eps() ) = 0 instead
+    for k in axes(WNK, 2)
         @simd for n in axes(WNK, 1)
-            @inbounds DNK[n,k] = tmp
-        end
-
-        BLAS.symv!('L', -2.0 / N1k, KNN, WNk, 1.0, view(DNK, :, k))
-    end
-
-    change = 0
-    for n in axes(WNK, 1) # no benefit with multithreading
-        kOld = findfirst(isone, view(WNK, n, :))
-        kNew = argmin(view(DNK, n, :))
-        if kOld ≠ kNew
-            @inbounds WNK[n,kOld], WNK[n,kNew] = 0.0, 1.0
-            change += 1
+            @inbounds WNK[n,k] = ifelse(iszero(DNK[n,k]), 0.0, exp(arg1 + arg2 * log(DNK[n,k]) - arg3 * log(SN1[n])))
         end
     end
 
-    return change
+    return nothing
 end
 
-function iterate!(WNK::MatI, DNK::MatI, N1K::MatI, KNN::MatI)
+#=
+Kernel Power K-means Iteration:
+-------------------------------
+    ...
+=#
+function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, p::Real) # type-stability ✓
+    p < 0 || error("`p` must be negative real number.")
     changes = 1
     trapped = 0
     itcount = 0
-    while changes ≠ 0 && trapped < 5 && itcount < 200
-        change_ = update!(WNK, DNK, N1K, KNN)
+
+    #=
+    If `trapped` is set to be too large, the algorithm will encouter
+    `NaN` issue due to the computation of:
+        -log(0) - log(Inf) = NaN
+    =#
+    while trapped < 10 && itcount < 200
+        update!(WNK, DNK, BNK, SN1, N1K, KNN, p) # p = p₀ * 1.04
         itcount += 1
-        println("Current change = $change_ ($itcount)")
+        change_ = 0
+        for n in eachindex(RNN) # no benefit with multithreading
+            kNew = argmax(view(WNK, n, :))
+            if @inbounds RNN[n] ≠ kNew
+                @inbounds RNN[n] = kNew
+                change_ += 1
+            end
+        end
+    
         if change_ ≠ changes
             changes = change_
-            trapped = 0
+            iszero(trapped) || (trapped = 0)
         else
             trapped += 1
         end
+        p *= 1.04
     end
+
     return nothing
 end
 
