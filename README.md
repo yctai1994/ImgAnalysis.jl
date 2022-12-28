@@ -16,6 +16,8 @@ pkg> add FileIO ImageIO ImageShow Plots
 
 ## #2 Usage
 
+### #2.1 Preprocess the image step by step
+
 ```julia
 import FileIO, ImageIO, ImageShow, Plots
 import ImgAnalysis: rgb_to_gray, Corrector, correction, leveling
@@ -44,4 +46,15 @@ imgGrayCorrectLevel = leveling(imgGrayCorrect)
 4. Demo the result
 ```julia
 Plots.heatmap(imgGrayCorrectLevel; color=:grays, aspect_ratio=:equal, yflip=true)
+```
+
+### #2.2 Directly preprocess the image and save to a new image file
+
+```julia
+import ImgAnalysis: preprocess
+preprocess(
+    "< src. img. >.jpg";
+    ifsave=true, fname="< des. img. >.jpg",
+    height_order=3, width_order=3
+)
 ```

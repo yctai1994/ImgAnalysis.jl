@@ -1,5 +1,6 @@
 module ImgAnalysis
 
+import FileIO, ImageIO
 import FixedPointNumbers: N0f8
 import Colors: RGB
 import LinearAlgebra: BLAS
@@ -195,6 +196,20 @@ function leveling!(des::MatO{T}, src::MatI{T}, m::Int, n::Int) where T<:Real
         end
     end
     return des
+end
+
+# = = = = = = = = = = = = = = = = = = = = = #
+# Gray Scale Renormalization                #
+# = = = = = = = = = = = = = = = = = = = = = #
+
+function renormalize!(img::Matrix{T}) where T<:Real
+    m, M = extrema(img)
+    a = inv(M - m)
+    b = -a * m
+    @simd for i in eachindex(img)
+        @inbounds img[i] = a * img[i] + b
+    end
+    return img
 end
 
 # = = = = = = = = = = = = = = = = = = = = = #
@@ -454,7 +469,7 @@ function update!(WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::Mat
         BLAS.symv!('U', -2.0 / N1k, KNN, WNk, 1.0, view(DNK, :, k))
     end
 
-    # Compute the generalized sum
+    # Compute the generalized p-sum
     for k in axes(BNK, 2)
         @simd for n in axes(BNK, 1)
             @inbounds BNK[n,k] = (DNK[n,k])^p
@@ -489,8 +504,8 @@ function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::Ma
     itcount = 0
 
     #=
-    If `trapped` is set to be too large, the algorithm will encouter
-    `NaN` issue due to the computation of:
+    If `trapped` is set to be too large, the algorithm will encounter
+    the `NaN` issue due to the computation of:
         -log(0) - log(Inf) = NaN
     =#
     while trapped < 10 && itcount < 200
@@ -504,7 +519,8 @@ function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::Ma
                 change_ += 1
             end
         end
-    
+
+        println("Current change = $change_ ($itcount)")
         if change_ ≠ changes
             changes = change_
             iszero(trapped) || (trapped = 0)
@@ -515,6 +531,22 @@ function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::Ma
     end
 
     return nothing
+end
+
+# = = = = = = = = = = = = = = = = = = = = = #
+# Interfaces                                #
+# = = = = = = = = = = = = = = = = = = = = = #
+
+# TODO: Check type stability
+function preprocess(src::String; ifsave::Bool=false, fname::String="", height_order::Int=3, width_order::Int=3)
+    imgRaw       = FileIO.load(src)
+    imgGray      = rgb_to_gray(imgRaw)
+    imgCorrector = Corrector(imgGray, height_order, width_order)
+    imgCorrected = correction(imgCorrector)
+    imgBackLevel = leveling!(imgCorrected, imgCorrected, size(imgCorrected)...)
+    imgResult    = renormalize!(imgBackLevel)
+    ifsave && fname ≠ "" && FileIO.save(fname, imgResult)
+    return imgResult
 end
 
 end # module ImgAnalysis
