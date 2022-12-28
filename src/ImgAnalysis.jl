@@ -256,19 +256,22 @@ end
 # Count Multiple Area in One Image by DFS   #
 # = = = = = = = = = = = = = = = = = = = = = #
 
-function count_area(img::BitMatrix)
+@inline online_avg(μ::T, v::Real, c::Real) where T<:Real  = isone(c) ? T(v) : μ + (v - μ) / c
+
+function count_area(img::MatI, ktarget::Int)
     m, n = size(img)
 
-    v = BitArray(false for i in 1:m, j in 1:n) # visited
-    r = Vector{NTuple{3,Int}}(undef, 0)        # records
-    s = IndexStack((m - 1) * n >> 1)           # stack
-    a = 0                                      # area
+    v = BitArray(false for i in 1:m, j in 1:n)        # visited
+    r = Vector{Tuple{Float64, Float64,Int}}(undef, 0) # records
+    s = IndexStack((m - 1) * n >> 1)                  # stack
+    a = 0                                             # area
 
     for j in axes(v, 2), i in axes(v, 1)
         if @inbounds !v[i,j]
             @inbounds v[i,j] = true
-            if @inbounds img[i,j]
+            if @inbounds img[i,j] ≡ ktarget
                 push!(s, i, j)
+                iₘ, jₘ, cₘ = online_avg(0.0, i, 1), online_avg(0.0, j, 1), 2
                 a += 1
             
                 while true
@@ -278,8 +281,9 @@ function count_area(img::BitMatrix)
                     jj = jx - 1
                     if 0 < jj && @inbounds !v[ix, jj]
                         @inbounds v[ix, jj] = true
-                        if @inbounds img[ix, jj]
+                        if @inbounds img[ix, jj] ≡ ktarget
                             push!(s, ix, jj)
+                            iₘ, jₘ, cₘ = online_avg(iₘ, ix, cₘ), online_avg(jₘ, jj, cₘ), cₘ+1
                             a += 1
                         end
                     end
@@ -287,8 +291,9 @@ function count_area(img::BitMatrix)
                     ii = ix - 1
                     if 0 < ii && @inbounds !v[ii, jx]
                         @inbounds v[ii, jx] = true
-                        if @inbounds img[ii, jx]
+                        if @inbounds img[ii, jx] ≡ ktarget
                             push!(s, ii, jx)
+                            iₘ, jₘ, cₘ = online_avg(iₘ, ii, cₘ), online_avg(jₘ, jx, cₘ), cₘ+1
                             a += 1
                         end
                     end
@@ -296,8 +301,9 @@ function count_area(img::BitMatrix)
                     jj = jx + 1
                     if jj ≤ n && @inbounds !v[ix, jj]
                         @inbounds v[ix, jj] = true
-                        if @inbounds img[ix, jj]
+                        if @inbounds img[ix, jj] ≡ ktarget
                             push!(s, ix, jj)
+                            iₘ, jₘ, cₘ = online_avg(iₘ, ix, cₘ), online_avg(jₘ, jj, cₘ), cₘ+1
                             a += 1
                         end
                     end
@@ -305,14 +311,15 @@ function count_area(img::BitMatrix)
                     ii = ix + 1
                     if ii ≤ m && @inbounds !v[ii, jx]
                         @inbounds v[ii, jx] = true
-                        if @inbounds img[ii, jx]
+                        if @inbounds img[ii, jx] ≡ ktarget
                             push!(s, ii, jx)
+                            iₘ, jₘ, cₘ = online_avg(iₘ, ii, cₘ), online_avg(jₘ, jx, cₘ), cₘ+1
                             a += 1
                         end
                     end
                 end
 
-                push!(r, (i, j, a))
+                push!(r, (iₘ, jₘ, a))
                 a = 0
             end
         end
