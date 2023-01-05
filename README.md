@@ -25,7 +25,8 @@ import ImgAnalysis: rgb_to_gray, Corrector, correction, leveling
 
 1. Import the image and convert it to a grayscale matrix.
 ```julia
-imgGray = rgb_to_gray(FileIO.load("<img path here>"))
+fname   = "<img path here>" # no file extension
+imgGray = Float32.(rgb_to_gray(FileIO.load(fname)))
 ```
 
 2. Correct the shading effect by using Legendre polynomials.
@@ -53,8 +54,8 @@ Plots.heatmap(imgGrayCorrectLevel; color=:grays, aspect_ratio=:equal, yflip=true
 ```julia
 import ImgAnalysis: preprocess
 preprocess(
-    "<source image>.jpg";
-    ifsave=true, fname="<destination image>.jpg",
+    "$fname.jpg";
+    ifsave=true, fname="$fname-processed.jpg",
     height_order=3, width_order=3
 )
 ```
@@ -63,12 +64,13 @@ preprocess(
 
 ```julia
 import FileIO, ImageIO, Plots, DelimitedFiles
-import ImgAnalysis: encoding, kernel!, kmeanspp!, iterate!
+import ImgAnalysis: encoding, kernel!, kmeanspp!, iterate!, count_area
 ```
 
 1. Import the preprocessed image.
 ```julia
-imgSrc = Float32.(FileIO.load("<source image>.jpg"))
+fname  = "<img path here>" # no file extension
+imgSrc = Float32.(FileIO.load("$fname.jpg"))
 ```
 
 2. Assign hyperparameters using the following steps.
@@ -118,19 +120,21 @@ iterate!(
 )
 ```
 
-8. Demo the result.
+8. Demo the result (in `ImgAnalysis.jl.git/tmp`).
 ```julia
-Plots.heatmap(imgResult; aspect_ratio=:equal, yflip=true)
+demo(imgSrc, imgResult; ifsave=false, fname="$fname-compare")
 ```
 
 9. You can find all the linked-pixel areas upon your interests using
 ```julia
 # target_label::Int is the label of
 # clustering, e.g., 1, 2, 3.
-count_area(imgResult, target_label)
+filtered_labels = count_area(imgResult, target_label)
+
+argmax(x -> x[3], filtered_labels)
 ```
 
-, or you can save the clustering result to a `.txt` file
+, or you can save the clustering result to a `.txt` file  (in `ImgAnalysis.jl.git/tmp`).
 ```julia
-DelimitedFiles.writedlm("<result name>.txt", imgResult)
+save_result("$fname.txt", imgResult; K=imgK, P=imgP, γH=imgγH, γW=imgγW, γG=imgγG)
 ```
