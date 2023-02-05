@@ -11,7 +11,7 @@ pkg> add ImgAnalysis
 Optionally, you can also install
 
 ```
-pkg> add FileIO ImageIO ImageShow Plots
+pkg> add FileIO ImageIO ImageShow CairoMakie
 ```
 
 ## # 2 Usage
@@ -19,7 +19,7 @@ pkg> add FileIO ImageIO ImageShow Plots
 ### # 2.1 Preprocess the image step by step
 
 ```julia
-import FileIO, ImageIO, ImageShow, Plots
+import FileIO, ImageIO, ImageShow, CairoMakie
 import ImgAnalysis: rgb_to_gray, Corrector, correction, leveling
 ```
 
@@ -44,11 +44,6 @@ imgGrayCorrect = correction(corrector)
 imgGrayCorrectLevel = leveling(imgGrayCorrect)
 ```
 
-4. Demo the result.
-```julia
-Plots.heatmap(imgGrayCorrectLevel; color=:grays, aspect_ratio=:equal, yflip=true)
-```
-
 ### # 2.2 Directly preprocess the image and save it to a new image file
 
 ```julia
@@ -63,7 +58,7 @@ preprocess(
 ## # 3 Clustering Pixels and Find Their Area
 
 ```julia
-import FileIO, ImageIO, Plots, DelimitedFiles
+import FileIO, ImageIO, CairoMakie, DelimitedFiles
 import ImgAnalysis: encoding, kernel!, kmeanspp!, iterate!, count_area
 ```
 
