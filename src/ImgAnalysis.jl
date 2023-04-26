@@ -504,11 +504,15 @@ Kernel Power K-means Iteration:
 -------------------------------
     ...
 =#
-function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, p::Real) # type-stability ✓
+function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, LOG::VecI{Int}, p::Real) # type-stability ✓
     p < 0 || error("`p` must be negative real number.")
-    changes = 1
+    changes = -1
     trapped = 0
     itcount = 0
+
+    @simd for i in eachindex(LOG)
+        @inbounds LOG[i] = -1
+    end
 
     #=
     If `trapped` is set to be too large, the algorithm will encounter
@@ -527,7 +531,8 @@ function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::Ma
             end
         end
 
-        println("Current change = $change_ ($itcount)")
+        @inbounds LOG[itcount] = change_
+
         if change_ ≠ changes
             changes = change_
             iszero(trapped) || (trapped = 0)
@@ -537,7 +542,7 @@ function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::Ma
         p *= 1.04
     end
 
-    return nothing
+    return view(LOG, 1:itcount)
 end
 
 # = = = = = = = = = = = = = = = = = = = = = #
