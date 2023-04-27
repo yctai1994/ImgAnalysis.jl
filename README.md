@@ -14,40 +14,12 @@ Optionally, you can also install
 pkg> add FileIO ImageIO ImageShow CairoMakie
 ```
 
-## # 2 Usage
+## # 2 Preprocess the image
 
-### # 2.1 Preprocess the image step by step
-
-```julia
-import FileIO, ImageIO, ImageShow, CairoMakie
-import ImgAnalysis: rgb_to_gray, Corrector, correction, leveling
-```
-
-1. Import the image and convert it to a grayscale matrix.
-```julia
-fname   = "<img path here>" # no file extension
-imgGray = Float32.(rgb_to_gray(FileIO.load(fname)))
-```
-
-2. Correct the shading effect by using Legendre polynomials.
-```julia
-# A Polynomial degree up to 2 or 3 is generally enough.
-height_order = 3
-width_order  = 3
-
-corrector = Corrector(imgGray, height_order, width_order)
-imgGrayCorrect = correction(corrector)
-```
-
-3. Background subtraction by data leveling.
-```julia
-imgGrayCorrectLevel = leveling(imgGrayCorrect)
-```
-
-### # 2.2 Directly preprocess the image and save it to a new image file
+### # Directly preprocess the image and save it to a new image file
 
 ```julia
-import ImgAnalysis: preprocess
+using ImgAnalysis
 preprocess(
     "$fname.jpg";
     ifsave=true, fname="$fname-processed.jpg",
@@ -59,77 +31,50 @@ preprocess(
 
 ```julia
 import FileIO, ImageIO, CairoMakie, DelimitedFiles
-import ImgAnalysis: encoding, kernel!, kmeanspp!, iterate!, count_area
+using ImgAnalysis
 ```
 
-1. Import the preprocessed image.
+1. Import the preprocessed image and prepare the `classifier`.
 ```julia
 fname  = "<img path here>" # no file extension
 imgSrc = Float32.(FileIO.load("$fname.jpg"))
+classifier = ImgClassifier(imgSrc;)
 ```
 
-2. Assign hyperparameters using the following steps.
+2. Assign hyperparameters and compute the kernel (Gram) matrix. (The comments  on the right-hand side are the alternatives if you want to avoid typing the full names of all arguments.)
 ```julia
-imgN  = length(imgSrc)
-imgK  = 3              # number of clustering
-imgP  = -1.0           # init. power value of power mean
-imgγH = 1.5            # height-similarity scale
-imgγW = 1.5            # width-similarity scale
-imgγG = 6.0            # grayscale-similarity scale
-```
-
-3. Encode the source image into a 3D equidistant space.
-```julia
-imgDat = encoding(imgSrc)
-```
-
-4. Compute the kernel (Gram) matrix.
-```julia
-imgKernel = kernel!(
-    Matrix{Float64}(undef, imgN, imgN), imgDat;
-    γH=imgγH, γW=imgγW, γG=imgγG
+set_params!(classifier;
+    cluster_num      = 4,   # K  = 4,
+    height_scaler    = 1.5, # γH = 1.5,
+    width_scaler     = 1.5, # γW = 1.5,
+    grayscale_scaler = 6.0  # γG = 6.0
 )
 ```
 
-5. Pre-allocate memory buffers to have efficient computation.
+3. Solve the clustering.
 ```julia
-imgDist2Means = Matrix{Float64}(undef, imgN, imgK)
-imgBufferNK   = similar(imgDist2Means)
-imgWeights    = Matrix{Float64}(undef, imgN, imgK)
-imgClusterVol = Matrix{Float64}(undef, 1, imgK)
-imgBufferN1   = Vector{Float64}(undef, imgN)
-imgResult     = similar(imgSrc, Int)
+solve!(classifier)
 ```
 
-6. Initialize the clustering.
+4. Demo the result (in `ImgAnalysis.jl.git/tmp`).
 ```julia
-kmeanspp!(imgResult, imgWeights, imgDist2Means, imgBufferNK, imgBufferN1, imgKernel, imgP)
+demo(imgSrc, classifier.result;
+     ifsave=false, fname="$fname-compare")
 ```
 
-7. Update the clustering.
-```julia
-iterate!(
-    imgResult, imgWeights, imgDist2Means,
-    imgBufferNK, imgBufferN1, imgClusterVol,
-    imgKernel, imgP * 1.04
-)
-```
-
-8. Demo the result (in `ImgAnalysis.jl.git/tmp`).
-```julia
-demo(imgSrc, imgResult; ifsave=false, fname="$fname-compare")
-```
-
-9. You can find all the linked-pixel areas upon your interests using
+5. You can find all the linked-pixel areas upon your interests using
 ```julia
 # target_label::Int is the label of
 # clustering, e.g., 1, 2, 3.
-filtered_labels = count_area(imgResult, target_label)
+filtered_labels = count_area(classifier.result, target_label)
 
 argmax(x -> x[3], filtered_labels)
 ```
 
 , or you can save the clustering result to a `.txt` file  (in `ImgAnalysis.jl.git/tmp`).
 ```julia
-save_result("$fname.txt", imgResult; K=imgK, P=imgP, γH=imgγH, γW=imgγW, γG=imgγG)
+params = classifier.params
+save_result("$fname.txt", classifier.result;
+            K=params.K, P=params.Pinit,
+            γH=params.γH, γW=params.γW, γG=params.γG)
 ```

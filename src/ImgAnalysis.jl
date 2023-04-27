@@ -1,6 +1,6 @@
 module ImgAnalysis
 
-export ImgClassifier, set_params!, solve!
+export ImgClassifier, set_params!, solve!, count_area, preprocess
 
 import FileIO, ImageIO
 import FixedPointNumbers: N0f8
