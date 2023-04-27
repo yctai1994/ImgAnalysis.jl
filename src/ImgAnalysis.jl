@@ -1,5 +1,7 @@
 module ImgAnalysis
 
+export ImgClassifier, set_params!, solve!
+
 import FileIO, ImageIO
 import FixedPointNumbers: N0f8
 import Colors: RGB
@@ -332,6 +334,91 @@ end
 # Kernel K-Means Clustering                 #
 # = = = = = = = = = = = = = = = = = = = = = #
 
+mutable struct Parameters
+    Kmax ::Int64             # number of clustering
+    one2K::Base.OneTo{Int64}
+    Pinit::Float64           # init. power value of power mean
+    γH   ::Float64           # height-similarity scale
+    γW   ::Float64           # width-similarity scale
+    γG   ::Float64           # grayscale-similarity scale
+end
+
+struct ImgClassifier
+    params        ::Parameters
+    encoded_data  ::Matrix{Float64}
+    kernel        ::Matrix{Float64}
+    weights       ::Matrix{Float64}
+    dist2means    ::Matrix{Float64}
+    bufferNKmax   ::Matrix{Float64}
+    cluster_volume::Matrix{Float64}
+    bufferN1      ::Vector{Float64}
+    iteration_log ::Vector{Int64}
+    result        ::Matrix{Int64}
+end
+
+function ImgClassifier(src::MatI{T}; max_cluster::Int=10, max_iteration::Int=200) where T<:Real
+    tot_pixel = length(src)
+
+    return ImgClassifier(
+        Parameters(max_cluster, Base.OneTo(3), -1.0, 1.5, 1.5, 6.0), encoding(src),
+        Matrix{Float64}(undef, tot_pixel, tot_pixel),
+        Matrix{Float64}(undef, tot_pixel, max_cluster),
+        Matrix{Float64}(undef, tot_pixel, max_cluster),
+        Matrix{Float64}(undef, tot_pixel, max_cluster),
+        Matrix{Float64}(undef, 1, max_cluster),
+        Vector{Float64}(undef, tot_pixel),
+        Vector{Int64}(undef, 200), similar(src, Int64)
+    )
+end
+
+function set_params!(
+        ic::ImgClassifier;
+        cluster_num::Int=0, K::Int=0,
+        height_scaler::Real=NaN, γH::Real=NaN,
+        width_scaler::Real=NaN, γW::Real=NaN,
+        grayscale_scaler::Real=NaN, γG::Real=NaN
+    )
+    params = ic.params
+
+    if 0 < cluster_num < params.Kmax
+        params.one2K = Base.OneTo(cluster_num)
+    elseif 0 < K < params.Kmax
+        params.one2K = Base.OneTo(K)
+    end
+
+    compute_kernel = false
+
+    if !isnan(height_scaler)
+        params.γH = height_scaler
+        compute_kernel = true
+    elseif !isnan(γH)
+        params.γH = γH
+        compute_kernel = true
+    end
+
+    if !isnan(width_scaler)
+        params.γW = width_scaler
+        compute_kernel = true
+    elseif !isnan(γW)
+        params.γW = γW
+        compute_kernel = true
+    end
+
+    if !isnan(grayscale_scaler)
+        params.γG = grayscale_scaler
+        compute_kernel = true
+    elseif !isnan(γG)
+        params.γG = γG
+        compute_kernel = true
+    end
+
+    if compute_kernel
+        kernel!(ic.kernel, ic.encoded_data, ic.params)
+    end
+
+    return nothing
+end
+
 #=
 Data Encoding:
 --------------
@@ -363,7 +450,9 @@ Parameters:
 =#
 @inline kernel(Δh::Real, Δw::Real, Δg::Real, γH::Real, γW::Real, γG::Real) = exp(-γH * abs(Δh) - γW * abs(Δw) - γG * abs(Δg))
 
-function kernel!(KNN::MatI, XMN::MatI; γH::Real=3.0, γW::Real=3.0, γG::Real=4e-2)
+kernel!(KNN::MatI, XMN::MatI, params::Parameters) = kernel!(KNN, XMN, params.γH, params.γW, params.γG)
+
+function kernel!(KNN::MatI, XMN::MatI, γH::Real, γW::Real, γG::Real)
     N = size(XMN, 2)
     for j in 1:N, i in j:N
         @inbounds KNN[i,j] = kernel(XMN[1,i] - XMN[1,j], XMN[2,i] - XMN[2,j], XMN[3,i] - XMN[3,j], γH, γW, γG)
@@ -398,7 +487,7 @@ K-means++ Initialization:
     The new centroid is chosen by
         (new centroid) = 𝗮𝗿𝗴𝗺𝗮𝘅 𝐷(𝐱) ∀ 𝐱
 =#
-function kmeanspp!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, KNN::MatI, p::Real) # type-stability ✓
+function kmeanspp!(WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, KNN::MatI, p::Real) # type-stability ✓
     N, K = size(WNK)
     m = rand(1:N) # randomly choose a point as the 1st centroid
     k = 1         # counting of found centroids
@@ -456,11 +545,11 @@ function kmeanspp!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, KNN::M
 end
 
 #=
-Kernel Power K-means Update:
-----------------------------
+Kernel Power K-means: Single-Step Iteration
+-------------------------------------------
     ...
 =#
-function update!(WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, p::Real) # type-stability ✓
+function iterate!(WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, p::Real) # type-stability ✓
     sum!(N1K, WNK) # no benefit with multithreading
 
     N, K = size(WNK)
@@ -500,11 +589,30 @@ function update!(WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::Mat
 end
 
 #=
-Kernel Power K-means Iteration:
--------------------------------
+Kernel Power K-means: Solve Clustering
+--------------------------------------
     ...
 =#
-function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, LOG::VecI{Int}, p::Real) # type-stability ✓
+function solve!(ic::ImgClassifier)
+    one2K = ic.params.one2K
+    kmeanspp!(
+        view(ic.weights,     :, one2K),
+        view(ic.dist2means,  :, one2K),
+        view(ic.bufferNKmax, :, one2K),
+        ic.bufferN1, ic.kernel, ic.params.Pinit
+    )
+    return solve!(
+        ic.result,
+        view(ic.weights,        :, one2K),
+        view(ic.dist2means,     :, one2K),
+        view(ic.bufferNKmax,    :, one2K),
+        ic.bufferN1,
+        view(ic.cluster_volume, :, one2K),
+        ic.kernel, ic.iteration_log, ic.params.Pinit * 1.04
+    )
+end
+
+function solve!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::MatI, KNN::MatI, LOG::VecI{Int}, p::Real) # type-stability ✓
     p < 0 || error("`p` must be negative real number.")
     changes = -1
     trapped = 0
@@ -520,7 +628,7 @@ function iterate!(RNN::MatI, WNK::MatI, DNK::MatI, BNK::MatI, SN1::VecI, N1K::Ma
         -log(0) - log(Inf) = NaN
     =#
     while trapped < 10 && itcount < 200
-        update!(WNK, DNK, BNK, SN1, N1K, KNN, p) # p = p₀ * 1.04
+        iterate!(WNK, DNK, BNK, SN1, N1K, KNN, p) # p = p₀ * 1.04
         itcount += 1
         change_ = 0
         for n in eachindex(RNN) # no benefit with multithreading
