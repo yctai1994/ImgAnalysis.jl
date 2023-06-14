@@ -2,16 +2,15 @@
 
 ## # 1 Installation
 
-```
-julia> ]
-pkg> registry add https://github.com/FemtoPhysics/FemtoPhysics-Registry.git#main
-pkg> add ImgAnalysis
+```julia
+julia> import Pkg
+julia> Pkg.add(url="https://github.com/FemtoPhysics/ImgAnalysis.jl.git")
 ```
 
 Optionally, you can also install
 
-```
-pkg> add FileIO ImageIO ImageShow CairoMakie
+```julia
+julia> Pkg.add("CairoMakie")
 ```
 
 ## # 2 Preprocess the image
