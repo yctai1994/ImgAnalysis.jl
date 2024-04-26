@@ -4,7 +4,7 @@
 
 ```julia
 julia> import Pkg
-julia> Pkg.add(url="https://github.com/FemtoPhysics/ImgAnalysis.jl.git")
+julia> Pkg.add(url="https://github.com/yctai1994/ImgAnalysis.jl.git")
 ```
 
 Optionally, you can also install

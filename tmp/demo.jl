@@ -6,14 +6,30 @@ function demo(
     ) where T<:Real
     nrow, ncol = size(res)
     ncat = maximum(res)
-    fig = CairoMakie.Figure(resolution=(7 * 180, 6 * 180))
-    ax1 = CairoMakie.Axis(fig[1,1], aspect=CairoMakie.DataAspect())
-    hm1 = CairoMakie.heatmap!(ax1, 0:nrow, 0:ncol, src; colormap=(:grays, 1.0))
-    ct1 = CairoMakie.contourf!(ax1, res; linewidth=0.0, colormap=(:Spectral_7, 0.4), levels=1:ncat+1)
-    ct2 = CairoMakie.contour!(ax1, res; linewidth=10.0, colormap=(:Spectral_7, 1.0), levels=1:ncat+1)
+
+    fig = CairoMakie.Figure(; size = (7 * 180, 6 * 180))
+    ax1 = CairoMakie.Axis(fig[1,1]; aspect = CairoMakie.DataAspect())
+    hm1 = CairoMakie.heatmap!(ax1, 0:nrow, 0:ncol, src; colormap = (:grays, 1.0))
+    ct1 = CairoMakie.contourf!(ax1, res;
+        linewidth = 0.0,
+        colormap = (:Spectral_7, 0.4),
+        levels = 1:ncat+1
+    )
+    ct2 = CairoMakie.contour!(ax1, res;
+        linewidth = 5.0,
+        colormap = (:Spectral_7, 1.0),
+        levels = 1:ncat+1
+    )
     CairoMakie.Colorbar(fig[1,2], hm1)
-    CairoMakie.Colorbar(fig[1,3], ct2)
+    CairoMakie.Colorbar(fig[1,3], ct1;
+        ticks = (
+            collect(range(1.5; stop = ncat + 0.5, step = 1.0)),
+            ["$x" for x in 1:ncat]
+        ),
+    )
+
     ifsave && fname ≠ "" && CairoMakie.save("$fname.png", fig)
+    
     return fig
 end
 
